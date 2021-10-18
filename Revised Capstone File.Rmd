@@ -1,0 +1,1366 @@
+---
+title: "Revised Capstone File"
+author: "Judson Webb"
+date: "March 20, 2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(coda)
+library(invgamma)
+library(dplyr)
+library(tidyverse) 
+library(caret) 
+library(tidyr)
+library(ggplot2)
+library(glmnet)
+library(gridExtra)
+library(broom)
+library(ggpubr)
+
+
+
+OWID <- read.csv("owid-covid-data.csv")
+gini <- read.csv("world_bank_gini.csv")
+corr <- read.csv("corruption_perception.csv")
+frag <- read.csv("fragile_states_index.csv")
+  
+gini <- gini %>%
+    group_by(Country.Name) %>% 
+    arrange(desc(Year)) %>% 
+    slice(1:1)
+gini <- dplyr::select(gini,location=Country.Name, gini_index = Value)
+corr <- dplyr::select(corr,-c(2,3,6,7,8,9))
+frag <- dplyr::select(frag,-c(2,3)) 
+frag <- dplyr::rename(frag,location=1,fragile_states_index=Total)
+
+corr <- dplyr::rename(corr,location=1)
+
+corr$location <- factor(corr$location, levels = c(levels(corr$location), "United States"))
+corr$location <- replace(corr$location,26,"United States")
+
+corr$location <- factor(corr$location, levels = c(levels(corr$location), "South Korea"))
+corr$location <- replace(corr$location,33,"South Korea")
+
+corr$location <- factor(corr$location, levels = c(levels(corr$location), "Cote d'Ivoire"))
+corr$location <- replace(corr$location,106,"Cote d'Ivoire")
+
+
+
+
+frag$location <- factor(frag$location, levels = c(levels(frag$location), "Czechia"))
+frag$location <- replace(frag$location,155,"Czechia")
+
+frag$location <- factor(frag$location, levels = c(levels(frag$location), "Slovakia"))
+frag$location <- replace(frag$location,151,"Slovakia")
+
+frag$location <- factor(frag$location, levels = c(levels(frag$location), "Israel"))
+frag$location <- replace(frag$location,69,"Israel")
+
+gini$location <- factor(gini$location, levels = c(levels(gini$location), "Czechia"))
+gini$location <- replace(gini$location,37,"Czechia")
+
+gini$location <- factor(gini$location, levels = c(levels(gini$location), "Slovakia"))
+gini$location <- replace(gini$location,127,"Slovakia")
+
+gini$location <- factor(gini$location, levels = c(levels(gini$location), "Egypt"))
+gini$location <- replace(gini$location,42,"Egypt")
+
+gini$location <- factor(gini$location, levels = c(levels(gini$location), "Iran"))
+gini$location <- replace(gini$location,42,"Iran")
+
+gini$location <- factor(gini$location, levels = c(levels(gini$location), "Russia"))
+gini$location <- replace(gini$location,119,"Russia")
+
+
+OWID <- left_join(OWID, gini,by = "location")
+OWID <- left_join(OWID, corr,by = "location")
+OWID <- left_join(OWID,frag,by = "location")
+
+OWID$date <- as.Date(OWID$date, format = "%Y-%m-%d")
+
+
+
+VOWID <- OWID %>%
+  filter(date>as.Date("2020-12-18", format = "%Y-%m-%d"))
+
+
+
+VOWID<- VOWID[!(VOWID$location=="Andorra"|VOWID$location=="Anguilla"|VOWID$location=="Bermuda"|VOWID$location=="Cayman Islands"|VOWID$location=="European Union"|VOWID$location=="Faeroe Islands"|VOWID$location=="Gibraltar"|VOWID$location=="Greenland"|VOWID$location=="Guernsey"|VOWID$location=="Isle of Man"|VOWID$location=="Jersey"|VOWID$location=="Liechtenstein"|VOWID$location=="Monaco"|VOWID$location=="Northern Cyprus"|VOWID$location=="Saint Helena"|VOWID$location=="Turks and Caicos Islands"|VOWID$location=="South America"|VOWID$location=="Saint Vincent and the Grenadines"|VOWID$location=="Saint Lucia"|VOWID$location=="Montserrat"|VOWID$location=="North Macedonia"|VOWID$location=="Maldives"|VOWID$location=="Laos"|VOWID$location=="Belize"|VOWID$location=="Cambodia"|VOWID$location=="Falkland Islands"|VOWID$location=="Hong Kong"|VOWID$location=="Macao"|VOWID$location=="Dominica"|VOWID$location=="Saint Kitts and Nevis"|VOWID$location=="San Marino"|VOWID$location=="North America"|VOWID$location=="Oceania"|VOWID$location=="Europe"|VOWID$location=="Asia"|VOWID$location=="Antigua and Barbuda"|VOWID$location=="Africa"|VOWID$location=="World"),]
+
+VOWID1 <- VOWID %>%
+  filter(date<as.Date("2021-01-18", format = "%Y-%m-%d"))
+VOWID2 <- VOWID %>%
+  filter(date<as.Date("2021-02-18", format = "%Y-%m-%d"))
+VOWID3 <- VOWID %>%
+  filter(date<as.Date("2021-03-18", format = "%Y-%m-%d"))
+
+VOWID1 <- VOWID1 %>% 
+  group_by(location) %>% 
+  summarise(total_vaccinations_per_hundred=max(total_vaccinations_per_hundred,na.rm = TRUE))
+VOWID1$total_vaccinations_per_hundred <- ifelse(VOWID1$total_vaccinations_per_hundred < 0, 0, VOWID1$total_vaccinations_per_hundred)
+VOWID1<- dplyr::rename(VOWID1,vaccinations_after_1M_per_hundred=total_vaccinations_per_hundred)
+
+VOWID2 <- VOWID2 %>% 
+  group_by(location) %>% 
+  summarise(total_vaccinations_per_hundred=max(total_vaccinations_per_hundred,na.rm = TRUE))
+VOWID2$total_vaccinations_per_hundred <- ifelse(VOWID2$total_vaccinations_per_hundred < 0, 0, VOWID2$total_vaccinations_per_hundred)
+VOWID2<- dplyr::rename(VOWID2,vaccinations_after_2M_per_hundred=total_vaccinations_per_hundred)
+
+VOWID3 <- VOWID3 %>% 
+  group_by(location) %>% 
+  summarise(total_vaccinations_per_hundred=max(total_vaccinations_per_hundred,na.rm = TRUE))
+VOWID3$total_vaccinations_per_hundred <- ifelse(VOWID3$total_vaccinations_per_hundred < 0, 0, VOWID3$total_vaccinations_per_hundred)
+VOWID3<- dplyr::rename(VOWID3,vaccinations_after_3M_per_hundred=total_vaccinations_per_hundred)
+
+VOWID <- left_join(VOWID, VOWID1,by = "location")
+VOWID <- left_join(VOWID,VOWID2,by = "location")
+VOWID <- left_join(VOWID,VOWID3,by = "location")
+
+VOWID <- VOWID %>%
+  filter(total_vaccinations>=0)
+
+VOWIDfirst <- VOWID %>% 
+  group_by(location) %>% 
+  summarise(days_from_first=julian(min(date,na.rm = TRUE),as.Date("2020-12-18", format = "%Y-%m-%d"))-1)
+
+VOWID <- left_join(VOWID,VOWIDfirst,by = "location")
+
+
+
+
+#date=format(max(date, '%m/%d/%y')) gini = max(gini_index)
+#Leaving off gini until complete data issue is solved
+grouped <- VOWID %>% 
+  group_by(location) %>% 
+  summarise(corruption = max(CPI.score.2020),fragility = max(fragile_states_index),vaccinations_after_1M_per_hundred=max(vaccinations_after_1M_per_hundred),vaccinations_after_2M_per_hundred = max(vaccinations_after_2M_per_hundred),total_cases_per_million=max(total_cases_per_million), total_deaths_per_million= max(total_deaths_per_million),human_development_index=max(human_development_index),population_density=max(population_density),population=max(population),median_age=max(median_age),aged_65_older=max(aged_65_older),life_expectancy=max(life_expectancy),diabetes_prevalence=max(diabetes_prevalence),human_rights_fragility= max(P3..Human.Rights),gdp_per_capita=max(gdp_per_capita)/1000,economic_inequality = max(E2..Economic.Inequality),days_from_first=max(days_from_first))
+
+#Experimental removal of human_development_index
+grouped <- grouped[,-c(1,4,8)]
+
+```
+
+(e) Ridge  
+```{r, echo=TRUE,warning=FALSE}
+
+x <- model.matrix(vaccinations_after_2M_per_hundred~.,data=grouped)[,-1]
+y <- grouped$vaccinations_after_2M_per_hundred
+
+
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+ridgemod <- glmnet(x,y,alpha=0,lambda=lambda_vec)
+optlamri <- cv.glmnet(x,y,alpha=0)$lambda.min
+ridgemodc <- predict(ridgemod,s=optlamri,type="coefficients")[2:15,]
+ridgemodc
+plot(ridgemodc)
+```
+
+(f) Lasso  
+```{r, echo=TRUE,warning=FALSE}
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+lassomod <- glmnet(x,y,alpha=1,lambda=lambda_vec)
+optlamla <- cv.glmnet(x,y,alpha=1)$lambda.min
+lassomodc <- predict(lassomod,s=optlamla,type="coefficients")[2:15,]
+lassomodc
+plot(lassomodc)
+```
+(g) Elastic Net with parameter $\alpha = .05$  
+```{r, echo=TRUE,warning=FALSE}
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+netmod <- glmnet(x,y,alpha=.5,lambda=lambda_vec)
+optlamne <- cv.glmnet(x,y,alpha=.5)$lambda.min
+netmodc <- predict(netmod,s=optlamne,type="coefficients")[2:14,]
+netmodc 
+plot(netmodc)
+```
+
+
+
+
+DAYS AFTER
+
+(e) Ridge  
+```{r, echo=TRUE,warning=FALSE}
+
+
+grouped <- grouped[,-3]
+
+x <- model.matrix(days_from_first~.,data=grouped)[,-1]
+y <- grouped$days_from_first
+
+
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+ridgemod <- glmnet(x,y,alpha=0,lambda=lambda_vec)
+optlamri <- cv.glmnet(x,y,alpha=0)$lambda.min
+ridgemodc <- predict(ridgemod,s=optlamri,type="coefficients")[2:14,]
+ridgemodc
+plot(ridgemodc)
+```
+
+(f) Lasso  
+```{r, echo=TRUE,warning=FALSE}
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+lassomod <- glmnet(x,y,alpha=1,lambda=lambda_vec)
+optlamla <- cv.glmnet(x,y,alpha=1)$lambda.min
+lassomodc <- predict(lassomod,s=optlamla,type="coefficients")[2:14,]
+lassomodc
+plot(lassomodc)
+```
+(g) Elastic Net with parameter $\alpha = .05$  
+```{r, echo=TRUE,warning=FALSE}
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+netmod <- glmnet(x,y,alpha=.5,lambda=lambda_vec)
+optlamne <- cv.glmnet(x,y,alpha=.5)$lambda.min
+netmodc <- predict(netmod,s=optlamne,type="coefficients")[2:14,]
+netmodc                                                                                                
+plot(netmodc)
+
+
+```
+
+
+```{r, echo=TRUE,warning=FALSE}
+
+
+# Importing required library 
+
+
+theme_set(theme_classic()) 
+  
+#date=format(max(date, '%m/%d/%y')) gini = max(gini_index)
+#Leaving off gini until complete data issue is solved
+grouped <- VOWID %>% 
+  group_by(location) %>% 
+  summarise(corruption = max(CPI.score.2020),fragility = max(fragile_states_index),vaccinations_after_1M_per_hundred=max(vaccinations_after_1M_per_hundred),vaccinations_after_2M_per_hundred = max(vaccinations_after_2M_per_hundred),vaccinations_after_3M_per_hundred = max(vaccinations_after_3M_per_hundred),total_cases_per_million=max(total_cases_per_million), total_deaths_per_million= max(total_deaths_per_million),human_development_index=max(human_development_index),population_density=max(population_density),population=max(population),median_age=max(median_age),aged_65_older=max(aged_65_older),life_expectancy=max(life_expectancy),diabetes_prevalence=max(diabetes_prevalence),human_rights_fragility= max(P3..Human.Rights),gdp_per_capita=max(gdp_per_capita)/1000,economic_inequality = max(E2..Economic.Inequality),days_from_first=max(days_from_first))
+
+
+grouped <- grouped[,-c(1,4)]
+
+
+
+training.samples <- grouped$vaccinations_after_3M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- grouped[training.samples, ] 
+test.data <- grouped[-training.samples, ] 
+
+# Build the model ,fragility,median_age
+model <- lm(vaccinations_after_3M_per_hundred ~ polym(corruption,aged_65_older,life_expectancy,diabetes_prevalence,human_rights_fragility,gdp_per_capita,economic_inequality,days_from_first, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)) 
+
+
+
+
+
+# Build the model ,fragility,median_age
+model <- lm(vaccinations_after_3M_per_hundred ~ polym(corruption,days_from_first,total_cases_per_million, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)) 
+
+# Build the model ,fragility,median_age
+model <- lm(vaccinations_after_3M_per_hundred ~ polym(human_development_index, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)) 
+
+
+    
+ggplot(train.data, aes(human_development_index, vaccinations_after_3M_per_hundred) ) + geom_point() +  
+stat_smooth(method = lm, formula = y ~ poly(x, 1, raw = TRUE)) 
+```
+
+
+```{r, echo=TRUE,warning=FALSE}
+
+
+# Importing required library 
+
+
+theme_set(theme_classic()) 
+  
+#date=format(max(date, '%m/%d/%y')) gini = max(gini_index)
+#Leaving off gini until complete data issue is solved
+grouped <- VOWID %>% 
+  group_by(location) %>% 
+  summarise(corruption = max(CPI.score.2020),fragility = max(fragile_states_index),vaccinations_after_1M_per_hundred=max(vaccinations_after_1M_per_hundred),vaccinations_after_2M_per_hundred = max(vaccinations_after_2M_per_hundred),vaccinations_after_3M_per_hundred = max(vaccinations_after_3M_per_hundred),total_cases_per_million=max(total_cases_per_million), total_deaths_per_million= max(total_deaths_per_million),human_development_index=max(human_development_index),population_density=max(population_density),population=max(population),median_age=max(median_age),aged_65_older=max(aged_65_older),life_expectancy=max(life_expectancy),diabetes_prevalence=max(diabetes_prevalence),human_rights_fragility= max(P3..Human.Rights),gdp_per_capita=max(gdp_per_capita)/1000,economic_inequality = max(E2..Economic.Inequality),days_from_first=max(days_from_first))
+
+
+grouped <- grouped[,-c(1,4)]
+
+
+
+training.samples <- grouped$days_from_first %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- grouped[training.samples, ] 
+test.data <- grouped[-training.samples, ] 
+  
+
+
+# Build the model ,fragility,median_age
+model <- lm(days_from_first ~ polym(human_development_index,corruption,aged_65_older,life_expectancy,diabetes_prevalence,human_rights_fragility,gdp_per_capita,economic_inequality, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$days_from_first), 
+           R2 = R2(predictions, test.data$days_from_first)) 
+
+
+
+
+
+# Build the model ,fragility,median_age
+model <- lm(days_from_first ~ polym(corruption,human_development_index,total_cases_per_million, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$days_from_first), 
+           R2 = R2(predictions, test.data$days_from_first)) 
+
+# Build the model ,fragility,median_age
+model <- lm(days_from_first ~ polym(human_development_index, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$days_from_first), 
+           R2 = R2(predictions, test.data$days_from_first)) 
+
+
+    
+ggplot(train.data, aes(human_development_index, vaccinations_after_3M_per_hundred) ) + geom_point() +  
+stat_smooth(method = lm, formula = y ~ poly(x, 1, raw = TRUE)) 
+
+```
+
+
+
+```{r, echo=TRUE,warning=FALSE}
+
+
+#date=format(max(date, '%m/%d/%y')) gini = max(gini_index)
+#Leaving off gini until complete data issue is solved
+grouped <- VOWID %>% 
+  group_by(location) %>% 
+  summarise(corruption = max(CPI.score.2020),fragility = max(fragile_states_index),vaccinations_after_1M_per_hundred=max(vaccinations_after_1M_per_hundred),vaccinations_after_2M_per_hundred = max(vaccinations_after_2M_per_hundred),vaccinations_after_3M_per_hundred = max(vaccinations_after_3M_per_hundred),total_cases_per_million=max(total_cases_per_million), total_deaths_per_million= max(total_deaths_per_million),human_development_index=max(human_development_index),population_density=max(population_density),population=max(population),median_age=max(median_age),aged_65_older=max(aged_65_older),life_expectancy=max(life_expectancy),diabetes_prevalence=max(diabetes_prevalence),human_rights_fragility= max(P3..Human.Rights),gdp_per_capita=max(gdp_per_capita)/1000,economic_inequality = max(E2..Economic.Inequality),days_from_first=max(days_from_first))
+
+
+grouped <- grouped[,-c(1,4)]
+
+
+
+median(grouped$human_development_index)
+```
+
+
+#DIVIDE BY HUMAN DEV
+
+```{r, echo=TRUE,warning=FALSE}
+
+progressed = filter(grouped,human_development_index > median(grouped$human_development_index))
+progressing = filter(grouped,human_development_index <= median(grouped$human_development_index))
+progressed = progressed[,-6]
+progressing = progressing[,-6]
+```
+
+
+#HIGH HUMAN DEV FOR VAC
+(e) Ridge  
+```{r, echo=TRUE,warning=FALSE}
+
+x <- model.matrix(vaccinations_after_3M_per_hundred~.,data=progressed)[,-1]
+y <- progressed$vaccinations_after_3M_per_hundred
+
+
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+ridgemod <- glmnet(x,y,alpha=0,lambda=lambda_vec)
+optlamri <- cv.glmnet(x,y,alpha=0)$lambda.min
+ridgemodc <- predict(ridgemod,s=optlamri,type="coefficients")[2:14,]
+ridgemodc
+plot(ridgemodc)
+```
+
+(f) Lasso  
+```{r, echo=TRUE,warning=FALSE}
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+lassomod <- glmnet(x,y,alpha=1,lambda=lambda_vec)
+optlamla <- cv.glmnet(x,y,alpha=1)$lambda.min
+lassomodc <- predict(lassomod,s=optlamla,type="coefficients")[2:14,]
+lassomodc
+plot(lassomodc)
+```
+(g) Elastic Net with parameter $\alpha = .05$  
+```{r, echo=TRUE,warning=FALSE}
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+netmod <- glmnet(x,y,alpha=.5,lambda=lambda_vec)
+optlamne <- cv.glmnet(x,y,alpha=.5)$lambda.min
+netmodc <- predict(netmod,s=optlamne,type="coefficients")[2:14,]
+netmodc 
+plot(netmodc)
+```
+
+#HIGH HUMAN DEV FOR DAYS
+DAYS AFTER
+
+(e) Ridge  
+```{r, echo=TRUE,warning=FALSE}
+
+
+progressed <- progressed[,-3]
+
+x <- model.matrix(days_from_first~.,data=progressed)[,-1]
+y <- progressed$days_from_first
+
+
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+ridgemod <- glmnet(x,y,alpha=0,lambda=lambda_vec)
+optlamri <- cv.glmnet(x,y,alpha=0)$lambda.min
+ridgemodc <- predict(ridgemod,s=optlamri,type="coefficients")[2:14,]
+ridgemodc
+plot(ridgemodc)
+```
+
+(f) Lasso  
+```{r, echo=TRUE,warning=FALSE}
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+lassomod <- glmnet(x,y,alpha=1,lambda=lambda_vec)
+optlamla <- cv.glmnet(x,y,alpha=1)$lambda.min
+lassomodc <- predict(lassomod,s=optlamla,type="coefficients")[2:14,]
+lassomodc
+plot(lassomodc)
+```
+(g) Elastic Net with parameter $\alpha = .05$  
+```{r, echo=TRUE,warning=FALSE}
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+netmod <- glmnet(x,y,alpha=.5,lambda=lambda_vec)
+optlamne <- cv.glmnet(x,y,alpha=.5)$lambda.min
+netmodc <- predict(netmod,s=optlamne,type="coefficients")[2:14,]
+netmodc                                                                                                
+plot(netmodc)
+
+
+```
+
+
+#LOW HUMAN DEV FOR VAC
+(e) Ridge  
+```{r, echo=TRUE,warning=FALSE}
+
+x <- model.matrix(vaccinations_after_3M_per_hundred~.,data=progressing)[,-1]
+y <- progressing$vaccinations_after_3M_per_hundred
+
+
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+ridgemod <- glmnet(x,y,alpha=0,lambda=lambda_vec)
+optlamri <- cv.glmnet(x,y,alpha=0)$lambda.min
+ridgemodc <- predict(ridgemod,s=optlamri,type="coefficients")[2:14,]
+ridgemodc
+plot(ridgemodc)
+```
+
+(f) Lasso  
+```{r, echo=TRUE,warning=FALSE}
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+lassomod <- glmnet(x,y,alpha=1,lambda=lambda_vec)
+optlamla <- cv.glmnet(x,y,alpha=1)$lambda.min
+lassomodc <- predict(lassomod,s=optlamla,type="coefficients")[2:15,]
+lassomodc
+plot(lassomodc)
+```
+(g) Elastic Net with parameter $\alpha = .05$  
+```{r, echo=TRUE,warning=FALSE}
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+netmod <- glmnet(x,y,alpha=.5,lambda=lambda_vec)
+optlamne <- cv.glmnet(x,y,alpha=.5)$lambda.min
+netmodc <- predict(netmod,s=optlamne,type="coefficients")[2:14,]
+netmodc 
+plot(netmodc)
+```
+
+#LOW HUMAN DEV FOR DAYS
+DAYS AFTER
+
+(e) Ridge  
+```{r, echo=TRUE,warning=FALSE}
+
+
+progressing <- progressing[,-3]
+
+x <- model.matrix(days_from_first~.,data=progressing)[,-1]
+y <- progressing$days_from_first
+
+
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+ridgemod <- glmnet(x,y,alpha=0,lambda=lambda_vec)
+optlamri <- cv.glmnet(x,y,alpha=0)$lambda.min
+ridgemodc <- predict(ridgemod,s=optlamri,type="coefficients")[2:14,]
+ridgemodc
+plot(ridgemodc)
+```
+
+(f) Lasso  
+```{r, echo=TRUE,warning=FALSE}
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+lassomod <- glmnet(x,y,alpha=1,lambda=lambda_vec)
+optlamla <- cv.glmnet(x,y,alpha=1)$lambda.min
+lassomodc <- predict(lassomod,s=optlamla,type="coefficients")[2:14,]
+lassomodc
+plot(lassomodc)
+```
+(g) Elastic Net with parameter $\alpha = .05$  
+```{r, echo=TRUE,warning=FALSE}
+#performs ten-fold cross-validation
+lambda_vec <- 10^seq(10,-2,length=100)
+#glmnet standardizes and does cross-validation automatically
+netmod <- glmnet(x,y,alpha=.5,lambda=lambda_vec)
+optlamne <- cv.glmnet(x,y,alpha=.5)$lambda.min
+netmodc <- predict(netmod,s=optlamne,type="coefficients")[2:14,]
+netmodc                                                                                                
+plot(netmodc)
+
+
+```
+
+
+#LOW HUMAN DEV FOR DAY PREDICTION
+
+
+```{r, echo=TRUE,warning=FALSE}
+
+
+# Importing required library 
+
+
+theme_set(theme_classic()) 
+  
+#date=format(max(date, '%m/%d/%y')) gini = max(gini_index)
+#Leaving off gini until complete data issue is solved
+grouped <- VOWID %>% 
+  group_by(location) %>% 
+  summarise(corruption = max(CPI.score.2020),fragility = max(fragile_states_index),vaccinations_after_1M_per_hundred=max(vaccinations_after_1M_per_hundred),vaccinations_after_2M_per_hundred = max(vaccinations_after_2M_per_hundred),vaccinations_after_3M_per_hundred = max(vaccinations_after_3M_per_hundred),total_cases_per_million=max(total_cases_per_million), total_deaths_per_million= max(total_deaths_per_million),human_development_index=max(human_development_index),population_density=max(population_density),population=max(population),median_age=max(median_age),aged_65_older=max(aged_65_older),life_expectancy=max(life_expectancy),diabetes_prevalence=max(diabetes_prevalence),human_rights_fragility= max(P3..Human.Rights),gdp_per_capita=max(gdp_per_capita)/1000,economic_inequality = max(E2..Economic.Inequality),days_from_first=max(days_from_first))
+
+
+
+
+progressing <- filter(grouped,human_development_index<median(human_development_index))
+
+progressing <- progressing[,-c(1,4,8)]
+
+training.samples <- progressing$days_from_first %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- progressing[training.samples, ] 
+test.data <- progressing[-training.samples, ] 
+  
+
+
+# Build the model ,fragility,median_age
+model <- lm(days_from_first ~ polym(corruption,aged_65_older,life_expectancy,diabetes_prevalence,human_rights_fragility,gdp_per_capita,economic_inequality, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$days_from_first), 
+           R2 = R2(predictions, test.data$days_from_first)) 
+
+
+
+
+
+# Build the model ,fragility,median_age
+model <- lm(days_from_first ~ polym(corruption,total_cases_per_million, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$days_from_first), 
+           R2 = R2(predictions, test.data$days_from_first)) 
+
+
+
+
+    
+ggplot(train.data, aes(human_development_index, vaccinations_after_3M_per_hundred) ) + geom_point() +  
+stat_smooth(method = lm, formula = y ~ poly(x, 1, raw = TRUE)) 
+
+
+
+```
+
+
+#HIGH HUMAN DEV FOR VAC PREDICTION
+```{r, echo=TRUE,warning=FALSE}
+
+
+# Importing required library 
+
+
+theme_set(theme_classic()) 
+  
+#date=format(max(date, '%m/%d/%y')) gini = max(gini_index)
+#Leaving off gini until complete data issue is solved
+grouped <- VOWID %>% 
+  group_by(location) %>% 
+  summarise(corruption = max(CPI.score.2020),fragility = max(fragile_states_index),vaccinations_after_1M_per_hundred=max(vaccinations_after_1M_per_hundred),vaccinations_after_2M_per_hundred = max(vaccinations_after_2M_per_hundred),vaccinations_after_3M_per_hundred = max(vaccinations_after_3M_per_hundred),total_cases_per_million=max(total_cases_per_million), total_deaths_per_million= max(total_deaths_per_million),human_development_index=max(human_development_index),population_density=max(population_density),population=max(population),median_age=max(median_age),aged_65_older=max(aged_65_older),life_expectancy=max(life_expectancy),diabetes_prevalence=max(diabetes_prevalence),human_rights_fragility= max(P3..Human.Rights),gdp_per_capita=max(gdp_per_capita)/1000,economic_inequality = max(E2..Economic.Inequality),days_from_first=max(days_from_first))
+
+
+progressed <- filter(grouped,human_development_index>=median(human_development_index))
+
+
+progressed <- progressed[,-c(1,4,8)]
+
+
+training.samples <- progressed$days_from_first %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- progressed[training.samples, ] 
+test.data <- progressed[-training.samples, ] 
+  
+
+
+# Build the model ,fragility,median_age
+model <- lm(days_from_first ~ polym(corruption,aged_65_older,life_expectancy,diabetes_prevalence,human_rights_fragility,gdp_per_capita,economic_inequality, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$days_from_first), 
+           R2 = R2(predictions, test.data$days_from_first)) 
+
+
+
+
+
+# Build the model ,fragility,median_age
+model <- lm(days_from_first ~ polym(corruption,total_cases_per_million, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$days_from_first), 
+           R2 = R2(predictions, test.data$days_from_first)) 
+
+
+
+
+    
+ggplot(train.data, aes(human_development_index, vaccinations_after_3M_per_hundred) ) + geom_point() +  
+stat_smooth(method = lm, formula = y ~ poly(x, 1, raw = TRUE)) 
+
+    
+
+
+```
+
+
+
+#Progressing Vaccine Prediction
+```{r, echo=TRUE,warning=FALSE}
+
+
+
+
+
+training.samples <- progressing$vaccinations_after_3M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- progressing[training.samples, ] 
+test.data <- progressing[-training.samples, ] 
+  
+
+
+# Build the model ,fragility,median_age
+model <- lm(vaccinations_after_3M_per_hundred ~ polym(corruption,aged_65_older,life_expectancy,diabetes_prevalence,human_rights_fragility,gdp_per_capita,economic_inequality,days_from_first, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)) 
+
+
+
+
+
+# Build the model ,fragility,median_age
+model <- lm(vaccinations_after_3M_per_hundred ~ polym(corruption,days_from_first,total_cases_per_million, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)) 
+
+
+
+
+    
+ggplot(train.data, aes(human_development_index, vaccinations_after_3M_per_hundred) ) + geom_point() +  
+stat_smooth(method = lm, formula = y ~ poly(x, 1, raw = TRUE)) 
+```
+
+
+#Progressed Vaccine Prediction
+```{r, echo=TRUE,warning=FALSE}
+
+
+
+
+
+training.samples <- progressed$vaccinations_after_3M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- progressed[training.samples, ] 
+test.data <- progressed[-training.samples, ] 
+  
+
+
+# Build the model ,fragility,median_age
+model <- lm(vaccinations_after_3M_per_hundred ~ polym(corruption,aged_65_older,life_expectancy,diabetes_prevalence,human_rights_fragility,gdp_per_capita,economic_inequality,days_from_first, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)) 
+
+
+
+
+
+# Build the model ,fragility,median_age
+model <- lm(vaccinations_after_3M_per_hundred ~ polym(corruption,days_from_first,total_cases_per_million, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)) 
+
+
+
+    
+ggplot(train.data, aes(human_development_index, vaccinations_after_3M_per_hundred) ) + geom_point() +  
+stat_smooth(method = lm, formula = y ~ poly(x, 1, raw = TRUE)) 
+```
+
+
+Looking at vaccine numbers for PCA at two months, excluding 1 month and the location variable \newline \newline
+
+```{r, echo=TRUE}
+
+library(plot3D)
+
+stDATA1 <- grouped[,-c(1,4)]
+for (each in 1:16){
+  stDATA1[[each]] <- as.double(stDATA1[[each]])
+  me = mean(stDATA1[[each]])
+  stan = sd(stDATA1[[each]])
+  for (every in 1:74){
+    stDATA1[every,each] <- (stDATA1[every,each]-me)/stan
+  }
+  
+  
+}
+
+
+(stDATA1[every,5]-me)/stan
+
+
+data <- prcomp(stDATA1,center = TRUE, scale = TRUE)
+
+
+vars <- apply(data$x, 2, var)  
+props <- vars / sum(vars)
+cumvar <- cumsum(props)
+#Gets proportion vector
+#Displays plot
+
+# cumulativevar <- data.frame("x" = 1:17,"y"=cumvar)
+# 
+# cumulativevar <-   cumulativevar %>% ggplot(aes(x = x,y=y)) + geom_line(aes(),color="blue",lwd=1)+geom_point(aes(),color="red",size = 3)+xlab("Principal Components")+ ylab("Cumulative Variance")
+# 
+# ggexport(cumulativevar,height = 400,width = 500,filename ="CumulativeVariance.png")
+
+
+data
+
+```
+
+#Polynomial Modeling with Reported Weighting
+
+##Vaccinations
+```{r, echo=TRUE}
+
+VOWID$date <- as.integer(format(as.Date(VOWID$date), "%Y%m%d"))
+
+General <- VOWID[,c(2,3,4,47,48,50,53,58,59,61,76,81,85,90,91,92,93)]
+General <- rename(General,Continent=continent ,corruption = CPI.score.2020,economic_inequality = E2..Economic.Inequality,fragility = fragile_states_index,human_rights_fragility = P3..Human.Rights)
+
+
+# 
+# training.samples <- General$vaccinations_after_3M_per_hundred %>% 
+#   createDataPartition(p = 0.8, list = FALSE) 
+# train.data  <- General[training.samples, ] 
+# test.data <- General[-training.samples, ] 
+# 
+# 
+# model <- lm(vaccinations_after_3M_per_hundred ~ polym(
+#   date,median_age,aged_65_older,diabetes_prevalence,life_expectancy,human_development_index,fragility,economic_inequality,human_rights_fragility,corruption, degree=5, raw = TRUE), data = train.data) 
+# # Make predictions 
+# predictions <- model %>% predict(test.data) 
+# # Model performance 
+# data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred), 
+#            R2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)) 
+# 
+
+
+
+```
+
+##Days From First
+```{r, echo=TRUE}
+
+# model <- lm(days_from_first ~ polym(
+#   date,median_age,aged_65_older,diabetes_prevalence,life_expectancy,human_development_index,fragility,economic_inequality,gdp_per_capita,corruption, degree=5, raw = TRUE), data = train.data) 
+# # Make predictions 
+# predictions <- model %>% predict(test.data) 
+# # Model performance 
+# data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred), 
+#            R2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)) 
+# 
+
+
+```
+
+#Polynomial Modeling without Reported Weighting
+
+
+```{r, echo=TRUE}
+
+generalSummarized <- General %>% 
+  group_by(location,Continent) %>% 
+  summarise(corruption = max(corruption),fragility = max(fragility),vaccinations_after_3M_per_hundred = max(vaccinations_after_3M_per_hundred),vaccinations_after_2M_per_hundred = max(vaccinations_after_2M_per_hundred),vaccinations_after_1M_per_hundred = max(vaccinations_after_1M_per_hundred),human_development_index=max(human_development_index),median_age=max(median_age),aged_65_older=max(aged_65_older),life_expectancy=max(life_expectancy),diabetes_prevalence=max(diabetes_prevalence),human_rights_fragility= max(human_rights_fragility),gdp_per_capita=max(gdp_per_capita)/1000,economic_inequality = max(economic_inequality),days_from_first=max(days_from_first))
+
+# 
+# generalSummarized$vaccinations_after_3M_per_hundred = log(generalSummarized$vaccinations_after_3M_per_hundred)
+# generalSummarized$vaccinations_after_2M_per_hundred = log(generalSummarized$vaccinations_after_2M_per_hundred)
+# generalSummarized$vaccinations_after_1M_per_hundred = log(generalSummarized$vaccinations_after_1M_per_hundred)
+# 
+# generalSummarized$vaccinations_after_3M_per_hundred[c(which(generalSummarized$vaccinations_after_3M_per_hundred == -Inf))] =-5
+# generalSummarized$vaccinations_after_2M_per_hundred[c(which(generalSummarized$vaccinations_after_2M_per_hundred == -Inf))] =-5
+# generalSummarized$vaccinations_after_1M_per_hundred[c(which(generalSummarized$vaccinations_after_1M_per_hundred == -Inf))] =-5
+
+training.samples <- generalSummarized$vaccinations_after_3M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+
+
+```
+#Data visualizations
+
+```{r, echo=TRUE}
+#REMOVING OCEANIA FOR VISUALS
+#generalSummarized <- filter(generalSummarized,Continent != "Oceania")
+
+a <- generalSummarized %>% ggplot(aes(x = human_development_index)) + geom_density(aes(colour =Continent))+xlab("Human Development Index")+ ylab("Density")
+
+b <- generalSummarized %>% ggplot(aes(x = corruption)) + geom_density(aes(colour =Continent))+xlab("Corruption Perception Index")+ ylab("Density")
+
+c <- generalSummarized %>% ggplot(aes(x = fragility)) + geom_density(aes(colour =Continent))+xlab("Fragile States Index")+ ylab("Density")
+
+d <- generalSummarized %>% ggplot(aes(x = economic_inequality)) + geom_density(aes(colour =Continent))+xlab("Economic Inequality Index")+ ylab("Density")
+
+figure <- ggarrange(a,b,c,d,
+                    ncol = 2, nrow = 2)
+#ggexport(figure,height = 480,width = 600,filename = "IndexDistributions.png")
+g <- generalSummarized %>% ggplot(aes(x = vaccinations_after_1M_per_hundred)) + geom_density(aes(colour =Continent))+xlab("Total Vaccinations Per 100 (One Month)")+ ylab("Density")
+
+h <- generalSummarized %>% ggplot(aes(x = vaccinations_after_2M_per_hundred)) + geom_density(aes(colour =Continent))+xlab("Total Vaccinations Per 100 (Two Months)")+ ylab("Density")
+
+e <- generalSummarized %>% ggplot(aes(x = vaccinations_after_3M_per_hundred)) + geom_density(aes(colour =Continent))+xlab("Total Vaccinations Per 100 (Three Months)")+ ylab("Density")
+
+f <- generalSummarized %>% ggplot(aes(x = days_from_first)) + geom_density(aes(colour =Continent))+xlab("Days From First")+ ylab("Density")
+
+figure <- ggarrange(g,h,e,f,
+                    ncol = 2, nrow = 2)
+#ggexport(figure,height = 600,width = 700,filename ="ResponseDistributions.png")
+```
+
+
+##Vaccinations 3M
+##Initial selection
+```{r, echo=TRUE}
+
+r2results = data.frame(r2result=numeric(),rmseresult=numeric(),BICresult=numeric(),AICresult=numeric(),response_var = character(),var_selection=character())
+
+sumr2 <- 0
+sumrmse <- 0
+sumBIC <- 0
+sumAIC <- 0
+for (each in 1:10){
+  
+training.samples <- generalSummarized$vaccinations_after_3M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+
+model <- lm(vaccinations_after_3M_per_hundred ~ polym(median_age,aged_65_older,diabetes_prevalence,life_expectancy,human_development_index,fragility,economic_inequality,human_rights_fragility,corruption,days_from_first, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)) 
+sumr2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)+sumr2
+sumrmse = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred)+sumrmse
+sumBIC =BIC(model)+sumBIC
+sumAIC =AIC(model)+sumBIC
+}
+r2results <- r2results %>% add_row(r2result = sumr2/10,rmseresult = sumrmse/10,BICresult = sumBIC/10, AICresult = sumAIC/10, response_var= "3M",  var_selection = "complete")
+```
+##Somewhat more reduced
+
+```{r, echo=TRUE}
+sumr2 <- 0
+sumrmse <- 0
+sumBIC <- 0
+sumAIC <- 0
+for (each in 1:10){
+  
+training.samples <- generalSummarized$vaccinations_after_3M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+
+model <- lm(vaccinations_after_3M_per_hundred ~ polym(aged_65_older,diabetes_prevalence,life_expectancy,human_development_index,economic_inequality,human_rights_fragility,corruption,days_from_first, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)) 
+sumr2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)+sumr2
+sumrmse = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred)+sumrmse
+sumBIC =BIC(model)+sumBIC
+sumAIC =AIC(model)+sumBIC
+}
+r2results <- r2results %>% add_row(r2result = sumr2/10,rmseresult = sumrmse/10,BICresult = sumBIC/10, AICresult = sumAIC/10, response_var= "3M",  var_selection = "reduced")
+```
+##Very reduced
+```{r, echo=TRUE}
+sumr2 <- 0
+sumrmse <- 0
+sumBIC <- 0
+sumAIC <- 0
+for (each in 1:10){
+  
+training.samples <- generalSummarized$vaccinations_after_3M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+
+model <- lm(vaccinations_after_3M_per_hundred ~ polym(diabetes_prevalence,life_expectancy,human_development_index,economic_inequality,human_rights_fragility, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)) 
+sumr2 = R2(predictions, test.data$vaccinations_after_3M_per_hundred)+sumr2
+sumrmse = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred)+sumrmse
+sumBIC =BIC(model)+sumBIC
+sumAIC =AIC(model)+sumBIC
+}
+r2results <- r2results %>% add_row(r2result = sumr2/10,rmseresult = sumrmse/10,BICresult = sumBIC/10, AICresult = sumAIC/10, response_var= "3M",  var_selection = "very reduced")
+```
+
+##Vaccinations 2M
+##Initial selection
+```{r, echo=TRUE}
+sumr2 <- 0
+sumrmse <- 0
+sumBIC <- 0
+sumAIC <- 0
+for (each in 1:10){
+  
+training.samples <- generalSummarized$vaccinations_after_2M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+
+model <- lm(vaccinations_after_2M_per_hundred ~ polym(median_age,aged_65_older,diabetes_prevalence,life_expectancy,human_development_index,fragility,economic_inequality,human_rights_fragility,corruption,days_from_first, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_2M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_2M_per_hundred)) 
+sumr2 = R2(predictions, test.data$vaccinations_after_2M_per_hundred)+sumr2
+sumrmse = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred)+sumrmse
+sumBIC =BIC(model)+sumBIC
+sumAIC =AIC(model)+sumBIC
+}
+r2results <- r2results %>% add_row(r2result = sumr2/10,rmseresult = sumrmse/10,BICresult = sumBIC/10, AICresult = sumAIC/10, response_var= "2M",  var_selection = "complete")
+```
+##Somewhat more reduced
+
+```{r, echo=TRUE}
+sumr2 <- 0
+sumrmse <- 0
+sumBIC <- 0
+sumAIC <- 0
+for (each in 1:10){
+  
+training.samples <- generalSummarized$vaccinations_after_2M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+
+model <- lm(vaccinations_after_2M_per_hundred ~ polym(aged_65_older,diabetes_prevalence,life_expectancy,human_development_index,economic_inequality,human_rights_fragility,corruption,days_from_first, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_2M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_2M_per_hundred)) 
+sumr2 = R2(predictions, test.data$vaccinations_after_2M_per_hundred)+sumr2
+sumrmse = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred)+sumrmse
+sumBIC =BIC(model)+sumBIC
+sumAIC =AIC(model)+sumBIC
+}
+r2results <- r2results %>% add_row(r2result = sumr2/10,rmseresult = sumrmse/10,BICresult = sumBIC/10, AICresult = sumAIC/10, response_var= "2M",  var_selection = "reduced")
+```
+##Very reduced
+```{r, echo=TRUE}
+sumr2 <- 0
+sumrmse <- 0
+sumBIC <- 0
+sumAIC <- 0
+for (each in 1:10){
+  
+training.samples <- generalSummarized$vaccinations_after_2M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+
+model <- lm(vaccinations_after_2M_per_hundred ~ polym(diabetes_prevalence,life_expectancy,human_development_index,economic_inequality,human_rights_fragility, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_2M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_2M_per_hundred)) 
+sumr2 = R2(predictions, test.data$vaccinations_after_2M_per_hundred)+sumr2
+sumrmse = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred)+sumrmse
+sumBIC =BIC(model)+sumBIC
+sumAIC =AIC(model)+sumBIC
+}
+r2results <- r2results %>% add_row(r2result = sumr2/10,rmseresult = sumrmse/10,BICresult = sumBIC/10, AICresult = sumAIC/10, response_var= "2M",  var_selection = "very reduced")
+```
+
+
+##Vaccinations 1M
+##Initial selection
+```{r, echo=TRUE}
+sumr2 <- 0
+sumrmse <- 0
+sumBIC <- 0
+sumAIC <- 0
+for (each in 1:10){
+  
+training.samples <- generalSummarized$vaccinations_after_1M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+
+model <- lm(vaccinations_after_1M_per_hundred ~ polym(median_age,aged_65_older,diabetes_prevalence,life_expectancy,human_development_index,fragility,economic_inequality,human_rights_fragility,corruption,days_from_first, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_1M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_1M_per_hundred)) 
+sumr2 = R2(predictions, test.data$vaccinations_after_1M_per_hundred)+sumr2
+sumrmse = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred)+sumrmse
+sumBIC =BIC(model)+sumBIC
+sumAIC =AIC(model)+sumBIC
+}
+r2results <- r2results %>% add_row(r2result = sumr2/10,rmseresult = sumrmse/10,BICresult = sumBIC/10, AICresult = sumAIC/10, response_var= "1M",  var_selection = "complete")
+```
+##Somewhat more reduced
+
+```{r, echo=TRUE}
+sumr2 <- 0
+sumrmse <- 0
+sumBIC <- 0
+sumAIC <- 0
+for (each in 1:10){
+  
+training.samples <- generalSummarized$vaccinations_after_1M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+
+model <- lm(vaccinations_after_1M_per_hundred ~ polym(aged_65_older,diabetes_prevalence,life_expectancy,human_development_index,economic_inequality,human_rights_fragility,corruption,days_from_first, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_1M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_1M_per_hundred)) 
+sumr2 = R2(predictions, test.data$vaccinations_after_1M_per_hundred)+sumr2
+sumrmse = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred)+sumrmse
+sumBIC =BIC(model)+sumBIC
+sumAIC =AIC(model)+sumBIC
+}
+r2results <- r2results %>% add_row(r2result = sumr2/10,rmseresult = sumrmse/10,BICresult = sumBIC/10, AICresult = sumAIC/10, response_var= "1M",  var_selection = "reduced")
+```
+##Very reduced
+```{r, echo=TRUE}
+sumr2 <- 0
+sumrmse <- 0
+sumBIC <- 0
+sumAIC <- 0
+for (each in 1:10){
+  
+training.samples <- generalSummarized$vaccinations_after_1M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+
+model <- lm(vaccinations_after_1M_per_hundred ~ polym(diabetes_prevalence,life_expectancy,human_development_index,economic_inequality,human_rights_fragility, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$vaccinations_after_1M_per_hundred), 
+           R2 = R2(predictions, test.data$vaccinations_after_1M_per_hundred)) 
+sumr2 = R2(predictions, test.data$vaccinations_after_1M_per_hundred)+sumr2
+
+sumrmse = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred)+sumrmse
+sumBIC =BIC(model)+sumBIC
+sumAIC =AIC(model)+sumBIC
+}
+r2results <- r2results %>% add_row(r2result = sumr2/10,rmseresult = sumrmse/10,BICresult = sumBIC/10, AICresult = sumAIC/10, response_var= "1M",  var_selection = "very reduced")
+```
+
+
+##Days From First
+##Initial Selection
+```{r, echo=TRUE}
+sumr2 <- 0
+sumrmse <- 0
+sumBIC <- 0
+sumAIC <- 0
+for (each in 1:10){
+  
+training.samples <- generalSummarized$vaccinations_after_3M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+model <- lm(days_from_first ~ polym(median_age,aged_65_older,diabetes_prevalence,life_expectancy,human_development_index,fragility,economic_inequality,gdp_per_capita,corruption, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$days_from_first), 
+           R2 = R2(predictions, test.data$days_from_first)) 
+sumr2 = R2(predictions, test.data$days_from_first)+sumr2
+sumrmse = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred)+sumrmse
+sumBIC =BIC(model)+sumBIC
+sumAIC =AIC(model)+sumBIC
+}
+r2results <- r2results %>% add_row(r2result = sumr2/10,rmseresult = sumrmse/10,BICresult = sumBIC/10, AICresult = sumAIC/10, response_var= "Days",  var_selection = "complete")
+```
+##Somewhat more reduced
+```{r, echo=TRUE}
+sumr2 <- 0
+sumrmse <- 0
+sumBIC <- 0
+sumAIC <- 0
+for (each in 1:10){
+  
+training.samples <- generalSummarized$vaccinations_after_3M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+model <- lm(days_from_first ~ polym(median_age,aged_65_older,life_expectancy,human_development_index,corruption, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$days_from_first), 
+           R2 = R2(predictions, test.data$days_from_first)) 
+sumr2 = R2(predictions, test.data$days_from_first)+sumr2
+sumrmse = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred)+sumrmse
+sumBIC =BIC(model)+sumBIC
+sumAIC =AIC(model)+sumBIC
+}
+r2results <- r2results %>% add_row(r2result = sumr2/10,rmseresult = sumrmse/10,BICresult = sumBIC/10, AICresult = sumAIC/10, response_var= "Days",  var_selection = "reduced")
+```
+##Very reduced
+```{r, echo=TRUE}
+sumr2 <- 0
+sumrmse <- 0
+sumBIC <- 0
+sumAIC <- 0
+for (each in 1:10){
+  
+training.samples <- generalSummarized$vaccinations_after_3M_per_hundred %>% 
+  createDataPartition(p = 0.8, list = FALSE) 
+train.data  <- generalSummarized [training.samples, ] 
+test.data <- generalSummarized [-training.samples, ] 
+
+model <- lm(days_from_first ~ polym(median_age,aged_65_older,life_expectancy,human_development_index, degree=1, raw = TRUE), data = train.data) 
+# Make predictions 
+predictions <- model %>% predict(test.data) 
+# Model performance 
+data.frame(RMSE = RMSE(predictions, test.data$days_from_first), 
+           R2 = R2(predictions, test.data$days_from_first)) 
+sumr2 = R2(predictions, test.data$days_from_first)+sumr2
+sumrmse = RMSE(predictions, test.data$vaccinations_after_3M_per_hundred)+sumrmse
+sumBIC =BIC(model)+sumBIC
+sumAIC =AIC(model)+sumBIC
+}
+r2results <- r2results %>% add_row(r2result = sumr2/10,rmseresult = sumrmse/10,BICresult = sumBIC/10, AICresult = sumAIC/10, response_var= "Days",  var_selection = "very reduced")
+```
+
+
+
+```{r, echo=TRUE}
+
+
+r2results$r2result <- round(r2results$r2result,digits=3)
+r2results$rmseresult <- round(r2results$rmseresult,digits=3)
+r2results$BICresult <- round(r2results$BICresult,digits=3)
+r2results$AICresult <- round(r2results$AICresult,digits=3)
+  
+
+
+#png("table.png", height=300, width=600)
+#p<-tableGrob(r2results,rows = NULL)
+#grid.arrange(p)
+#dev.off()
+
+a <- r2results %>% ggplot(aes(x = r2result)) + geom_density(aes(colour =response_var))+xlab("R2 Results")+ ylab("Density")
+
+
+
+c <- r2results %>% ggplot(aes(x =r2result)) + geom_density(aes(colour =var_selection))+xlab("R2 Results")+ ylab("Density")
+
+
+figure <-  ggarrange(a,c,ncol=2,nrow=1) 
+
+ggexport(figure,height = 300,width = 600,filename = "PredictionResults.png")
+modelvac <- lm(vaccinations_after_3M_per_hundred ~ median_age+aged_65_older+diabetes_prevalence+life_expectancy+human_development_index+fragility+economic_inequality+human_rights_fragility+corruption+days_from_first, data = generalSummarized) 
+
+modeldays <- lm(days_from_first ~ median_age+aged_65_older+diabetes_prevalence+life_expectancy+human_development_index+fragility+economic_inequality+gdp_per_capita+corruption , data = generalSummarized) 
+
+newdays <- tidy(modeldays)
+
+newdays$estimate <- round(newdays$estimate,digits=3)
+newdays$std.error <- round(newdays$std.error,digits=3)
+newdays$statistic <- round(newdays$statistic,digits=3)
+newdays$p.value <- round(newdays$p.value,digits=3)
+
+newvac <- tidy(modelvac)
+
+newvac$estimate <- round(newvac$estimate,digits=3)
+newvac$std.error <- round(newvac$std.error,digits=3)
+newvac$statistic <- round(newvac$statistic,digits=3)
+newvac$p.value <- round(newvac$p.value,digits=3)
+
+
+newdays
+
+-104.161+2*52.699
+-.317+2*.175
+-3.879+2*2.260
+-.957+2*1.027
+-.634+2*.711
+-.452+2*.886
+-.122+2*.254
+.045+2*.246
+-.121+2*.678
+
+#png("VacModel.png", height=300, width=400)
+#p<-tableGrob(newvac,rows = NULL)
+#grid.arrange(p)
+#dev.off()
+
+#png("DaysModel.png", height=300, width=400)
+#p<-tableGrob(newdays,rows = NULL)
+#grid.arrange(p)
+#dev.off()
+
+
+```
+
+```{r, echo=TRUE}
+Day_Residuals <- modeldays$residuals
+Vaccine_Residuals <- modelvac$residuals
+dat = data.frame(Day_Residuals,Vaccine_Residuals, x = 1:length(Day_Residuals))
+
+a<- ggplot(data= dat, aes(y = Day_Residuals,x=x))+ geom_point()
+
+b<- ggplot(data= dat, aes(y = Vaccine_Residuals,x=x))+ geom_point()
+
+figure <-  ggarrange(a,b,ncol=2,nrow=1) 
+
+ggexport(figure,height = 300,width = 600,filename = "Residuals.png")
+```
+
+
+```{r, echo=TRUE}
+grouped <- VOWID %>% 
+  group_by(location) %>% 
+  summarise(fragility = max(fragile_states_index),vaccinations_after_1M_per_hundred=max(vaccinations_after_1M_per_hundred),vaccinations_after_3M_per_hundred = max(vaccinations_after_3M_per_hundred),total_cases_per_million=max(total_cases_per_million), total_deaths_per_million= max(total_deaths_per_million),human_development_index=max(human_development_index),population_density=max(population_density),population=max(population),median_age=max(median_age),aged_65_older=max(aged_65_older),life_expectancy=max(life_expectancy),diabetes_prevalence=max(diabetes_prevalence),human_rights_fragility= max(P3..Human.Rights),gdp_per_capita=max(gdp_per_capita)/1000,economic_inequality = max(E2..Economic.Inequality),days_from_first=max(days_from_first))
+
+
+grouped$Low_Vaccinations = grouped$vaccinations_after_3M_per_hundred<1
+
+
+a<- ggplot(data= grouped, aes(y = human_development_index,x=location,color =Low_Vaccinations))+ geom_point()+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+ggexport(a,height = 300,width = 500,filename = "VaccinationDivide.png")
+
+
+```
